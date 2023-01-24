@@ -18,9 +18,5 @@ void test_validate_my_username()
     const char *ch2;
     ch1 = my_username();
     ch2 = malloc_username_from_conf_file();
-    /**
-     * TODO: Replace the line below with your code here as described above to verify your /conf/username.txt 
-     * config file and my_username() functions are setup properly
-     */
     TEST_ASSERT_TRUE_MESSAGE((strcmp(ch1, ch2) == 0),"AESD students, please fix me!");
 }
