@@ -141,8 +141,8 @@ error_handling_0:
         err = -1;
     }
 error_handling_1:
-    closelog();
     if (err < 0 ) {
+        closelog();
         exit(1);
     }
     return 0;
