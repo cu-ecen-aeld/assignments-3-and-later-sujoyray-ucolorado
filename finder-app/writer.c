@@ -24,9 +24,10 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <libgen.h>
-#include <sys/stat.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include <errno.h>
 #include <syslog.h>
 #include <unistd.h>
@@ -102,40 +103,48 @@ int main (int argc, char *argv[]) {
 */
 int writer(char *filename, char *string)
 {
-    FILE  *fp;
-    int rc = 0;
+    int32_t fd;
+    int32_t err = 0;
 
     syslog(LOG_DEBUG, "Writing %s to file %s ", string, filename);
 
-    fp = fopen(filename, "w");    
-    if( fp == NULL)
+    fd = open (filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    
+    if( fd < 0)
     {
         syslog(LOG_ERR, "File Open error, file name: %s: %s", filename, 
-            strerror(errno));        
-        closelog();
-        exit(1);
+            strerror(errno));   
+        err = -1;
+        goto error_handling_1;
+
     }
 
-    rc = fprintf(fp, "%s", string);
-    if ( rc < 0 ) {
+    if ( write (fd, string, strlen(string)) < 0 ) {
         
         syslog(LOG_ERR, "File Writer Error, file name: %s: %s", filename, 
-            strerror(errno)); 
-        fclose(fp);
-        closelog();
-        exit(1);
+            strerror(errno));   
+        err = -1;
+        goto error_handling_0;
     }
 
-    rc = fflush(fp);
-    if ( rc < 0 ) {   
+    if ( fsync(fd) < 0 ) {   
         syslog(LOG_ERR, "File Writer Error to disk, file name: %s: %s", filename, 
             strerror(errno)); 
-        fclose(fp);
-        closelog();
-        exit(1);
+        err = -1;
+        goto error_handling_0;
     }
 
-    fclose(fp);    
-    return rc;
+error_handling_0:
+    if (close (fd) < 0) { 
+        syslog(LOG_ERR, "File close Error, file name: %s: %s", filename, 
+            strerror(errno));        
+        err = -1;
+    }
+error_handling_1:
+    closelog();
+    if (err < 0 ) {
+        exit(1);
+    }
+    return 0;
 }
 
