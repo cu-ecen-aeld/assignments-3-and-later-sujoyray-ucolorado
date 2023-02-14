@@ -42,51 +42,11 @@ export OBJOUTPUTDIR =$(PWD)
 export BUILD_INC_DIR=$(SRC_BASE)/include
 export Output_DIR= $(PWD)
 
-#Call respective makefiles to add sources and set up include path
-
-# C entry point
-C_SOURCES += writer.c
-
-
-#Convert .C and .S files to .o files 
-COBJS         := $(foreach source_file, $(C_SOURCES:.c=.obj), $(OBJOUTPUTDIR)/$(notdir $(source_file)) )
-ASMOBJS       := $(foreach source_file, $(ASM_SOURCES:.S=.obj), $(OBJOUTPUTDIR)/$(notdir $(source_file)) )
-OBJS          := $(COBJS) $(ASMOBJS)
-
-PROJECT = writer
-VPATH = $(SRC_DIR)
-
-
 RM      = rm -f
-MKDIR   = @mkdir -p $(@D) #creates folders if not present
+all: writer
 
-#GCC FLAGS
-CFLAGS =-g -Wall -Werror ${addprefix -I ,${BUILD_INC_DIR}} ${C_DEBUG_FLAG}
-AFLAGS =
-
-
-#LD FLAGS Flags
-
-LDFLAGS = -lm
-
-# Rules to build elf file
-all: $(Output_DIR)/$(PROJECT)
-
-$(COBJS) : $(OBJOUTPUTDIR)/%.obj : %.c
-	@echo CC: ${<}
-	$(MKDIR)
-	@${CC} -o ${@} ${CFLAGS} -c $(<) 
-
-$(ASMOBJS) : $(OBJOUTPUTDIR)/%.obj : %.S
-	@echo AS: ${<}
-	$(MKDIR)
-	@${CC} -o ${@} ${AFLAGS} -c $(<) 
-
-$(Output_DIR)/$(PROJECT): $(OBJS)
-	@echo LD: ${@}
-	$(MKDIR)
-	@$(LD) -o ${@} $^ $(LDFLAGS)
-	
+writer: writer.o
+	$(CC) -o writer writer.o	
 
 clean:
 	-$(RM) *.o*
