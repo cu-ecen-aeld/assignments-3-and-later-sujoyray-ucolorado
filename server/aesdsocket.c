@@ -139,8 +139,13 @@ static int aesdsocket_server(int d_mode) {
     struct timespec now;
     int diff_time = 0;
 
+
     if(d_mode == TRUE) {
-        daemon(0,0);
+        rc = daemon(0,0);
+        if (rc < 0) {
+            syslog(LOG_ERR, "aesdsocket: daemon creation error %s", strerror(errno));
+            goto  return_func;
+        }
     }
 
     fp =  fopen("/var/tmp/aesdsocketdata", "a+");
@@ -250,6 +255,15 @@ static int aesdsocket_server(int d_mode) {
                         goto goto_mem_cleanup;
                     }
                     int file_len = ftell(fp);
+                    /* 
+                    ** Timeout reached and if not data is saved, discard the packet.
+                    ** If file consists of data, send /replay the buffer and then wait for 
+                    ** new connection.
+                    */
+                    if (file_len == 0) {
+                        syslog(LOG_ERR, "aesdsocket: No data saved, after 100 ms timeout rejecting packet");
+                        goto discard_packet;
+                    }
                     tx_buf = (char *) malloc(file_len);
                     if (tx_buf == NULL) {
                         rc = -1;
@@ -274,6 +288,7 @@ static int aesdsocket_server(int d_mode) {
                         syslog(LOG_ERR, "aesdsocket: fseek failed %s", strerror(errno)); 
                         goto goto_mem_cleanup; 
                     }
+                    discard_packet :
                     if(buffer) { free(buffer); buffer = NULL;}
                     if(file_buffer) { free(file_buffer); file_buffer = NULL;}
                     if(tx_buf) { free(tx_buf); tx_buf = NULL;}
