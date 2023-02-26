@@ -1,0 +1,38 @@
+#!/bin/sh
+#/*****************************************************************************
+#* Copyright (C) 2023 by Sujoy Ray
+#*
+#* Redistribution, modification or use of this software in source or binary
+#* forms is permitted as long as the files maintain this copyright. Users are
+#* permitted to modify this and use it to learn about the field of embedded
+#* software. Sujoy Ray and the University of Colorado are not liable for
+#* any misuse of this material.
+#*
+#*****************************************************************************/
+#/**
+#* @file  aesdsocket-start-stop
+#* @brief : The script is responsible to start and stop the aesdsocket
+#*
+#* @author Sujoy Ray
+#* @date February 26, 2023
+#* @version 1.0
+#* CREDIT: Header credit: University of Colorado coding standard
+#* CREDIT: Consulted find and grep command options from the manual and book.  
+#*
+#*/
+
+case "$1" in
+  start)
+    echo "Starting aesdsocket..."
+    start-stop-daemon -S -n aesdsocket --exec /usr/bin/aesdsocket -- -d
+    ;;
+  stop)
+    echo "Stopping aesdsocket..."
+    start-stop-daemon -K -n aesdsocket
+    ;;
+  *)
+    echo "Usage : $0 {start | stop}"
+    exit 1;
+   ;;
+esac
+exit 0;
