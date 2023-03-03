@@ -195,12 +195,13 @@ static int aesdsocket_server(int d_mode) {
         goto exit_shutdown;
     }
 
+    rc = listen(soc_server, MAX_SERVER_CONNECTION);
+    if (rc < 0) {
+        syslog(LOG_ERR, "aesdsocket: API listen failed %s", strerror(errno));
+        goto exit_shutdown;
+    }
+
     while( exit_aesd_soc == FALSE) {
-        rc = listen(soc_server, MAX_SERVER_CONNECTION);
-        if (rc < 0) {
-            syslog(LOG_ERR, "aesdsocket: API listen failed %s", strerror(errno));
-            goto exit_shutdown;
-        }
 
         soc_client = accept(soc_server, (struct sockaddr*)&aesdsoc_addr, 
             (socklen_t*)&aesdsoc_addr_len);
@@ -224,15 +225,18 @@ static int aesdsocket_server(int d_mode) {
             goto exit_client;
         }
 
-        int total_bytes_received = 0;
-        buffer = (char*)malloc(buffer_size);
+        syslog(LOG_INFO, "aesdsocket: allocating buffer");
+
+        int byte_allocated = buffer_size;
+        file_buffer = (char*)malloc(sizeof(char)*(buffer_size+100)); 
+        buffer = (char*)malloc(sizeof(char)* buffer_size);
         if(buffer == NULL) {    
             rc = -1;
             syslog(LOG_ERR, "aesdsocket: malloc failed %s", strerror(errno));
             goto exit_client;
         }
         while(1) {
-            rcv_data_len = recv(soc_client, buffer + total_bytes_received, buffer_size - total_bytes_received, 0);
+            rcv_data_len = recv(soc_client, buffer, buffer_size, 0);
             if (rcv_data_len < 0) {
                 rc = clock_gettime(CLOCK_MONOTONIC, &now);
                 if (rc < 0) {            
@@ -241,19 +245,6 @@ static int aesdsocket_server(int d_mode) {
                 }
                 diff_time = ((now.tv_sec - start.tv_sec) * 1000000) + ((now.tv_nsec - start.tv_nsec) / 1000); 
                 if(diff_time > MSEC_2_USEC(PACKET_TIMEOUT_END)) {   
-                    file_buffer = (char*)malloc(total_bytes_received+1);
-                    if(file_buffer == NULL) {
-                        rc = -1;
-                        if(buffer) free(buffer);
-                        syslog(LOG_ERR, "aesdsocket: malloc failed %s", strerror(errno));
-                        goto goto_mem_cleanup;
-                    }
-                    if (process_and_save_data(buffer, file_buffer, 
-                            total_bytes_received, &wr_pointer, fp) < 0) {
-                        rc = -1;
-                        syslog(LOG_ERR, "aesdsocket: process_and_save_data");
-                        goto goto_mem_cleanup;
-                    }
                     int file_len = ftell(fp);
                     /* 
                     ** Timeout reached and if not data is saved, discard the packet.
@@ -289,10 +280,10 @@ static int aesdsocket_server(int d_mode) {
                         goto goto_mem_cleanup; 
                     }
                     discard_packet :
+                    syslog(LOG_INFO, "aesdsocket: packet sent, freeing up the buffer"); 
                     if(buffer) { free(buffer); buffer = NULL;}
                     if(file_buffer) { free(file_buffer); file_buffer = NULL;}
                     if(tx_buf) { free(tx_buf); tx_buf = NULL;}
-                    total_bytes_received = 0;
                     buffer_size =  FIXED_RD_BUF_SIZE;
                     wr_pointer = 0;
                     close(soc_client);
@@ -315,8 +306,21 @@ static int aesdsocket_server(int d_mode) {
                     syslog(LOG_ERR, "aesdsocket: clock_gettime failed %s", strerror(errno));
                     goto goto_mem_cleanup;
                 }
-                total_bytes_received += rcv_data_len;
+                if (process_and_save_data(buffer, file_buffer, 
+                    rcv_data_len, &wr_pointer, fp) < 0) {
+                    rc = -1;
+                    syslog(LOG_ERR, "aesdsocket: process_and_save_data");
+                    goto goto_mem_cleanup;
+                }
                 buffer_size *= 2;
+                byte_allocated += buffer_size;
+                syslog(LOG_INFO, "aesdsocket: file_buffer %d", byte_allocated+1);
+                file_buffer = (char*)realloc(file_buffer, byte_allocated+1);
+                if(file_buffer == NULL) {
+                    syslog(LOG_ERR, "aesdsocket: realloc failed %s", strerror(errno));
+                    goto goto_mem_cleanup;
+                }
+                syslog(LOG_INFO, "aesdsocket: buffer %d", buffer_size);
                 buffer = (char*)realloc(buffer, buffer_size);
                 if (buffer == NULL) {                    
                     syslog(LOG_ERR, "aesdsocket: realloc failed %s", strerror(errno));
@@ -372,19 +376,22 @@ static int process_and_save_data(char *buffer, char *file_buffer,
     char *start = &buffer[buf_rd_ptr];
     char *end = &buffer[buf_rd_ptr];
     int len_to_copy = rcv_data_len;  
-    end  = strstr(buffer, "\n");
+    end  = memchr(buffer, '\n', rcv_data_len ); 
+    syslog(LOG_INFO, "aesdsocket: process_and_save_data: RCV_len = %d, wr_pointer = %d", rcv_data_len, *wr_pointer);
     while(1) {
         if(end == NULL) {
             memcpy(&file_buffer[*wr_pointer], &buffer[buf_rd_ptr], len_to_copy);
             *wr_pointer += len_to_copy;
+            syslog(LOG_INFO, "aesdsocket: process_and_save_data: saving %d in memory, wr= =%d", len_to_copy, *wr_pointer);
             buf_rd_ptr = 0;
             break;
         }
         else {
             pos = (unsigned int)(end - start+1);
-            memcpy(&file_buffer[*wr_pointer], &buffer[buf_rd_ptr], pos);  
+            memcpy(&file_buffer[*wr_pointer], &buffer[buf_rd_ptr], pos); 
             *wr_pointer += pos;
             file_buffer[*wr_pointer] ='\n';            
+            syslog(LOG_INFO, "aesdsocket: process_and_save_data: saving %d in file", *wr_pointer);
             rc = fwrite (file_buffer , sizeof(char), *wr_pointer, fp);
             if (rc < 0) {
                 syslog(LOG_ERR, "aesdsocket: fwrite failed %s", strerror(errno));
@@ -394,10 +401,12 @@ static int process_and_save_data(char *buffer, char *file_buffer,
             *wr_pointer = 0;
             len_to_copy = len_to_copy - pos;
             buf_rd_ptr += pos;
+            syslog(LOG_INFO, "aesdsocket: process_and_save_data: len= %d", len_to_copy);
+
             if(len_to_copy == 0) break;
         }
         start = end+1;
-        end  = strstr(start, "\n");
+        end = memchr(start, '\n', len_to_copy );
     }
     return 0;
 }
