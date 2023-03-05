@@ -709,7 +709,7 @@ static void *soc_thread(void *argument) {
     pthread_mutex_lock(&link_list_mutex);
     th_data->done = 1;
     pthread_mutex_unlock(&link_list_mutex);
-    pthread_exit(NULL);
+    return argument;
 }
 
 
