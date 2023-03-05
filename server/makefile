@@ -44,11 +44,12 @@ export Output_DIR= $(PWD)
 
 RM      = rm -f
 CFLAGS =-g -Wall -Werror
+LIBS =-lpthread -lrt
 
 all: aesdsocket
 
 aesdsocket: aesdsocket.o
-	$(CC) -o aesdsocket ${CFLAGS} aesdsocket.o	
+	$(CC) -o aesdsocket ${CFLAGS} aesdsocket.o ${LIBS}	
 
 clean:
 	-$(RM) *.o*
