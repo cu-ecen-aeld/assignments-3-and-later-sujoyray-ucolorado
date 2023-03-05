@@ -72,6 +72,10 @@ static void *soc_thread(void *argument);
 static volatile sig_atomic_t exit_aesd_soc = FALSE;
 static volatile sig_atomic_t file_close = TRUE;
 static volatile sig_atomic_t soc_close = FALSE;
+static volatile sig_atomic_t file_write = FALSE;
+static volatile sig_atomic_t mutex_close = FALSE;
+
+
 FILE *fp;
 
 
@@ -91,26 +95,31 @@ pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER;
 timer_t timerid;
 
 
-void asesd_soc_timer_handler(int signum) {
+void asesd_soc_timer_write(void) {
     time_t now;
     struct tm* cur_time;
     char time_stamp[100];
     
-    syslog(LOG_INFO,"**** Inside AESDSOCKET timer handler ****");
+    //syslog(LOG_INFO,"**** Inside AESDSOCKET timer handler ****");
 
     time(&now);
     cur_time = localtime(&now);
     strftime(time_stamp, sizeof(time_stamp), "%Y-%m-%d %H:%M:%S", cur_time);
 
-    pthread_mutex_lock(&file_mutex);
-
+    //pthread_mutex_lock(&file_mutex);     
     fprintf(fp, "timestamp: %s\n", time_stamp);
     fflush(fp);
+    //pthread_mutex_unlock(&file_mutex);
+    file_write = FALSE;
     
-    pthread_mutex_unlock(&file_mutex);
-
     syslog(LOG_INFO,"**** Wrote TS AESDSOCKET timer handler ****");
     
+}
+
+void asesd_soc_timer_handler(int signum) {
+   syslog(LOG_INFO,"**** Hello timer handler ****");
+   asesd_soc_timer_write();
+   file_write = TRUE;
 }
 
 
@@ -240,6 +249,14 @@ static int aesdsocket_server(int d_mode) {
         goto exit_shutdown;
     }
 
+    syslog(LOG_INFO,"**** AESDSOCKET application: listen ****");
+
+    rc = listen(soc_server, MAX_SERVER_CONNECTION);
+    if (rc < 0) {
+        syslog(LOG_ERR, "aesdsocket: API listen failed %s", strerror(errno));
+        goto exit_shutdown;
+    }
+
 
     if(d_mode == TRUE) {
         rc = daemon(0,0);
@@ -274,21 +291,13 @@ static int aesdsocket_server(int d_mode) {
         syslog(LOG_ERR, "aesdsocket: Sigaction failed for SIGTERM %s", strerror(errno));
         goto error_1;
     }
+    
 
     syslog(LOG_INFO,"**** AESDSOCKET application: socket ****");
-
-
     
-    syslog(LOG_INFO,"**** AESDSOCKET application: listen ****");
-
-    rc = listen(soc_server, MAX_SERVER_CONNECTION);
-    if (rc < 0) {
-        syslog(LOG_ERR, "aesdsocket: API listen failed %s", strerror(errno));
-        goto exit_shutdown;
-    }
 
     while( exit_aesd_soc == FALSE) {
-        
+                
         syslog(LOG_INFO,"**** AESDSOCKET application: accept ****");
 
         soc_client = accept(soc_server, (struct sockaddr*)&aesdsoc_addr, 
@@ -335,8 +344,8 @@ static int aesdsocket_server(int d_mode) {
         // Wait for threads to finish
         ASEDSocThread_t *temp;
         ASEDSocThread_t *ptr;
-        while (1) {
-            pthread_mutex_lock(&link_list_mutex);
+        //while (1) {
+            pthread_mutex_lock(&link_list_mutex);            
             SLIST_FOREACH_SAFE(ptr, &head, entries, temp) {
                 if (ptr->done == 1) {
                     syslog(LOG_INFO, "Pthread join for %lu", ptr->thread);
@@ -348,16 +357,16 @@ static int aesdsocket_server(int d_mode) {
             }
             pthread_mutex_unlock(&link_list_mutex);
             if (SLIST_EMPTY(&head)) {
-                break;
+                //break;
             }
-        }
-
+        //}
+       
     }
 
     //Todo need better strategy for now let's hack it
     ASEDSocThread_t *temp;
     ASEDSocThread_t *ptr;
-    while (1) {
+    //while (1) {
         pthread_mutex_lock(&link_list_mutex);
         SLIST_FOREACH_SAFE(ptr, &head, entries, temp) {
             if (ptr->done == 1) {
@@ -370,9 +379,9 @@ static int aesdsocket_server(int d_mode) {
         }
         pthread_mutex_unlock(&link_list_mutex);
         if (SLIST_EMPTY(&head)) {
-            break;
+            //break;
         }
-    }
+    //}
 
     goto exit_shutdown;
     exit_client:
@@ -392,14 +401,28 @@ static int aesdsocket_server(int d_mode) {
     return rc;
 }
 
+int prev_len = 0;
 
 int sendpacket(int soc_client)
 {
     char *tx_buf = NULL;
+    int data_wrote = 0;
 
+    pthread_mutex_lock(&file_mutex);
 
+    
     int file_len = ftell(fp);
-    if(!file_len) return 0;
+    data_wrote = file_len- prev_len; 
+    syslog(LOG_INFO, "File info %d %d", file_len, prev_len);
+
+    if((data_wrote) <=0) {
+        
+        syslog(LOG_INFO, "Nothing to send %d %d", file_len, prev_len);
+        goto return_send;
+    }
+    prev_len = file_len;
+    if(!file_len) goto return_send;
+    
     tx_buf = (char *) malloc(file_len);
     syslog(LOG_INFO, "Sneding %d to client", file_len);
     if(fseek(fp, 0, SEEK_SET)) {  
@@ -414,7 +437,9 @@ int sendpacket(int soc_client)
         syslog(LOG_ERR, "aesdsocket: fseek failed %s", strerror(errno));  
     }    
     free(tx_buf);
-    return file_len;
+ return_send: 
+    pthread_mutex_unlock(&file_mutex);
+    return data_wrote;
 }
 /*
 * process_and_save_data
@@ -490,12 +515,14 @@ static int process_and_save_data(char *buffer, char *file_buffer,
 static void aesdsoc_sighandler(int signal_no) {
 
     syslog(LOG_INFO, "Caught signal, exiting"); 
-    if (signal_no == SIGINT || signal_no == SIGTERM) {
+    if (signal_no == SIGINT || signal_no == SIGTERM ) {
        exit_aesd_soc = TRUE;
        soc_close = TRUE;
     }
     if (signal_no == SIGINT )
-       file_close = FALSE;     
+       file_close = FALSE;    
+    
+
 }
 
 
@@ -505,8 +532,8 @@ static void *soc_thread(void *argument) {
     char *file_buffer = NULL;
     char *tx_buf = NULL;
     struct timespec start;
-    struct timespec now;
-    int diff_time = 0;
+    //struct timespec now;
+    //int diff_time = 0;
     int rcv_data_len = 0;
     int wr_pointer = 0;
     int buffer_size = FIXED_RD_BUF_SIZE;
@@ -520,6 +547,7 @@ static void *soc_thread(void *argument) {
     syslog(LOG_INFO, "aesdsocket: thread started");
 
     while( exit_aesd_soc == FALSE) {
+        //if(file_write == TRUE) asesd_soc_timer_write();
 
         rc = clock_gettime(CLOCK_MONOTONIC, &start);
         if (rc < 0) {
@@ -538,10 +566,13 @@ static void *soc_thread(void *argument) {
             goto exit_client;
         }
         while(exit_aesd_soc == FALSE) {  
-            usleep(1);
-            syslog(LOG_INFO, "aesdsocket: receive %d %d", soc_client, buffer_size);
             rcv_data_len = recv(soc_client, buffer, buffer_size, 0);
+            syslog(LOG_INFO, "aesdsocket: receive %d %d %d", soc_client, buffer_size, rcv_data_len);
+
             if (rcv_data_len < 0) {
+                
+                
+                //if(file_write == TRUE) asesd_soc_timer_write();
                 
                 
 #if 0                
@@ -593,7 +624,7 @@ static void *soc_thread(void *argument) {
                     rc = clock_gettime(CLOCK_MONOTONIC, &start);
                     syslog(LOG_INFO, "aesdsocket: packet sent, freeing up the buffer"); 
 #endif
-
+#if 0
                     rc = clock_gettime(CLOCK_MONOTONIC, &now);
                     if (rc < 0) {            
                         syslog(LOG_ERR, "aesdsocket: clock_gettime failed %s", strerror(errno));
@@ -618,12 +649,27 @@ static void *soc_thread(void *argument) {
                             close(soc_client);
                             goto exit_client;
                         }
+                   
                         
                     }
+#endif                         
+                       int len = sendpacket(soc_client);
+                        if (len > 0) {
+                           if(buffer) { free(buffer); buffer = NULL;}
+                           if(file_buffer) { free(file_buffer); file_buffer = NULL;}
+                           if(tx_buf) { free(tx_buf); tx_buf = NULL;}
+                           buffer_size =  FIXED_RD_BUF_SIZE;
+                           wr_pointer = 0;
+                           close(soc_client);
+                           goto exit_client;
+                           break;         
+                        }
                     
            }
       
             else if (rcv_data_len == 0) {
+                
+                //if(file_write == TRUE) asesd_soc_timer_write();
                 if(buffer) { free(buffer); buffer = NULL;}
                 if(file_buffer) { free(file_buffer); file_buffer = NULL;}
                 if(tx_buf) { free(tx_buf); tx_buf = NULL;} 
@@ -646,6 +692,18 @@ static void *soc_thread(void *argument) {
                     syslog(LOG_ERR, "aesdsocket: process_and_save_data return error");
                     goto goto_mem_cleanup;
                 }
+                
+                int len = sendpacket(soc_client);
+                 if (len > 0) {
+                    if(buffer) { free(buffer); buffer = NULL;}
+                    if(file_buffer) { free(file_buffer); file_buffer = NULL;}
+                    if(tx_buf) { free(tx_buf); tx_buf = NULL;}
+                    buffer_size =  FIXED_RD_BUF_SIZE;
+                    wr_pointer = 0;
+                    close(soc_client);
+                    goto exit_client;
+                    break;         
+                 }
                 if(mem_cleanup_buf) {
                     
                     if(buffer) { free(buffer); buffer = NULL;}
@@ -682,6 +740,9 @@ static void *soc_thread(void *argument) {
     if(file_buffer) { free(file_buffer); file_buffer = NULL;}
     if(tx_buf) { free(tx_buf); tx_buf = NULL;}
 
+    if(mutex_close){pthread_mutex_unlock(&file_mutex); mutex_close = FALSE;}
+    
+    //if(file_write == TRUE) asesd_soc_timer_write();
 
     //pthread_mutex_unlock(&file_mutex);
     // Set done flag and return    
