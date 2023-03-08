@@ -28,10 +28,10 @@
 
 #Set compiler options
 COMPILER_PREFIX=
-CC=$(CROSS_COMPILE)gcc
-AS=$(CROSS_COMPILE)as
-LD=$(CROSS_COMPILE)gcc
-OBJCOPY=$(CROSS_COMPILE)objcopy
+CC?=$(CROSS_COMPILE)gcc
+AS?=$(CROSS_COMPILE)as
+LD?=$(CROSS_COMPILE)gcc
+OBJCOPY?=$(CROSS_COMPILE)objcopy
 
 # Get all directories lined up
 export C_SOURCES=
@@ -43,12 +43,13 @@ export BUILD_INC_DIR=$(SRC_BASE)/include
 export Output_DIR= $(PWD)
 
 RM      = rm -f
-CFLAGS =-g -Wall -Werror
+CFLAGS+=-g -Wall -Werror
+LDFLAGS+=-lpthread -lrt
 
 all: aesdsocket
 
 aesdsocket: aesdsocket.o
-	$(CC) -o aesdsocket ${CFLAGS} aesdsocket.o	
+	$(CC) -o aesdsocket ${CFLAGS} aesdsocket.o ${LDFLAGS}	
 
 clean:
 	-$(RM) *.o*
