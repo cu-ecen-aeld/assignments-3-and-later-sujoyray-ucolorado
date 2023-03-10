@@ -16,6 +16,7 @@
 
 #include "aesd-circular-buffer.h"
 
+
 /**
  * @param buffer the buffer to search for corresponding offset.  Any necessary locking must be performed by caller.
  * @param char_offset the position to search for in the buffer list, describing the zero referenced
@@ -29,9 +30,35 @@
 struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct aesd_circular_buffer *buffer,
             size_t char_offset, size_t *entry_offset_byte_rtn )
 {
-    /**
-    * TODO: implement per description
-    */
+    uint8_t read_index = buffer->out_offs;
+    size_t current_char_offset = 0;
+    size_t entry_size = 0;
+
+    if (buffer == NULL) {
+        return NULL;
+    }
+    if (entry_offset_byte_rtn == NULL) {
+        return NULL;
+    }
+
+    if ((buffer->in_offs == buffer->out_offs) && (buffer->full ==0)) {
+        /* Empty buffer*/
+        return NULL;
+    }
+
+    do {
+        entry_size = buffer->entry[read_index].size;
+        if ((current_char_offset + entry_size) > char_offset) {
+            *entry_offset_byte_rtn = char_offset - current_char_offset;
+            return &buffer->entry[read_index];
+        }
+        current_char_offset += entry_size;
+        read_index = (read_index + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+        /* At this point, the condition below indicates the code read all the entries */
+        if(read_index == buffer->out_offs) break;
+  
+    } while(current_char_offset <= char_offset);
+
     return NULL;
 }
 
@@ -44,9 +71,23 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
 */
 void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
 {
-    /**
-    * TODO: implement per description
-    */
+    if(buffer == NULL) {
+        return;
+    }
+
+    buffer->entry[buffer->in_offs] = *add_entry;
+
+    /* Increment the write pointer */
+    buffer->in_offs = (buffer->in_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+
+    if ((buffer->in_offs == buffer->out_offs) && !buffer->full) {
+        /* Buffer full*/
+        buffer->full = 1;
+    }
+    /* Once buffer is full, read pointer will follow the write pointer */
+    if (buffer->full == 1) {
+        buffer->out_offs = buffer->in_offs; 
+    }            
 }
 
 /**
