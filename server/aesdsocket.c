@@ -346,7 +346,7 @@ static int aesdsocket_server(int d_mode) {
     struct sigaction signal_action;    
     int soc_client = -1;
     struct sockaddr_in aesdsoc_addr;
-
+    int file_create = 0;
     syslog(LOG_INFO,"**** AESDSOCKET application: socket ****");
     soc_server = socket(AF_INET, SOCK_STREAM, 0);
     if (soc_server < 0) {
@@ -390,15 +390,6 @@ static int aesdsocket_server(int d_mode) {
     syslog(LOG_INFO, "aesdsocket:Starting aesdsocket_server in daemon = %s", 
         ((d_mode ==1)? "TRUE" : "FALSE")); 
 
-#if (USE_AESD_CHAR_DEVICE == 1)
-    fp =  fopen("/dev/aesdchar", "a+");
-#else
-    fp =  fopen("/var/tmp/aesdsocketdata", "a+");
-#endif
-    if (fp == NULL) {
-        syslog(LOG_ERR, "aesdsocket: File open Error %s", strerror(errno));
-        goto  error_0;
-    }
 
     file_close = TRUE;
     
@@ -434,6 +425,19 @@ static int aesdsocket_server(int d_mode) {
         if (rc < 0) {
             syslog(LOG_ERR, "aesdsocket: fcntl failed %s", strerror(errno));
             goto error_3;
+        }
+
+        if (file_create == 0) {
+#if (USE_AESD_CHAR_DEVICE == 1)
+            fp =  fopen("/dev/aesdchar", "a+");
+#else
+            fp =  fopen("/var/tmp/aesdsocketdata", "a+");
+#endif
+            if (fp == NULL) {
+                syslog(LOG_ERR, "aesdsocket: File open Error %s", strerror(errno));
+                goto  error_0;
+            }
+            file_create = 1;
         }
         
         ASEDSocThread_t *thread_struct;

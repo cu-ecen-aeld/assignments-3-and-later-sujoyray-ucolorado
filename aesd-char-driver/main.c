@@ -341,6 +341,7 @@ int aesd_init_module(void)
 void aesd_cleanup_module(void)
 {
     uint8_t index = 0;
+    //int rc = 0;
     struct aesd_buffer_entry *entry;
 
     dev_t devno = MKDEV(aesd_major, aesd_minor);
@@ -352,7 +353,7 @@ void aesd_cleanup_module(void)
     **
     */
     PDEBUG("Freeing memory from clean-up module\n");
-    //mutex_destroy(&aesdchar_mutex);
+    mutex_destroy(&aesdchar_mutex);
     AESD_CIRCULAR_BUFFER_FOREACH(entry,&aesd_buf,index) {
         kfree(entry->buffptr);
     }
