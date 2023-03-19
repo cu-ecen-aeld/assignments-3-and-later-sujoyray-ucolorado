@@ -97,3 +97,14 @@ void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer)
 {
     memset(buffer,0,sizeof(struct aesd_circular_buffer));
 }
+
+struct aesd_buffer_entry * aesd_circular_buffer_return_full_pointer(struct aesd_circular_buffer *buffer, int * buf_status)
+{
+    *buf_status  = buffer->full; 
+    if(buffer->full == 1) {
+        return &buffer->entry[buffer->out_offs];
+    }
+    //return NULL;
+    return &buffer->entry[buffer->in_offs];
+}
+
