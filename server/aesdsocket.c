@@ -486,7 +486,11 @@ static int aesdsocket_server(int d_mode) {
     if(file_close) {
         fclose(fp);
     }
-#if (USE_AESD_CHAR_DEVICE != 1)       
+#if (USE_AESD_CHAR_DEVICE == 1)
+    fclose(fp);
+    remove("/dev/aesdchar");
+
+#else
     if(remove("/var/tmp/aesdsocketdata")) {
         printf("Error file removal\n");
     }
