@@ -104,7 +104,21 @@ struct aesd_buffer_entry * aesd_circular_buffer_return_full_pointer(struct aesd_
     if(buffer->full == 1) {
         return &buffer->entry[buffer->out_offs];
     }
-    //return NULL;
     return &buffer->entry[buffer->in_offs];
+}
+
+
+unsigned int aesd_circular_buffer_return_size(struct aesd_circular_buffer *buffer)
+{
+    
+    uint8_t read_index = buffer->out_offs;    
+    size_t entry_size = 0;
+    while(1) {
+        entry_size += buffer->entry[read_index].size;
+        read_index = (read_index + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+        /* At this point, the condition below indicates the code read all the entries */
+        if(read_index == buffer->in_offs) break;
+    }
+    return entry_size;
 }
 

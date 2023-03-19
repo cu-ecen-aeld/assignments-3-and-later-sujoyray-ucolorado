@@ -9,6 +9,9 @@
  * @date 2019-10-22
  * @copyright Copyright (c) 2019
  *
+ * CREDIT: https://sites.google.com/site/linuxkernel88/sample-code/writing-a-character-driver
+ *         Consulted above link for llseek implementation
+ *
  */
 
 
@@ -224,12 +227,54 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     err_return:
     if(rc == 0) {
         rc = count;
+        *f_pos += count;
     }
-    PDEBUG("Received %d bytes from user.\n", count);
     mutex_unlock(&aesdchar_mutex);
     return rc;
 }
 
+
+loff_t aesd_llseek(struct file *file, loff_t offset, int whence)
+{
+    loff_t new_buf_position;
+    unsigned int device_size = 0;
+    struct aesd_circular_buffer *aesd_buf;
+    int ret = 0;
+    
+    ret = mutex_lock_interruptible(&aesdchar_mutex);
+    if (ret < 0) {
+        return ret;
+    }
+    
+    device_size  = aesd_circular_buffer_return_size(aesd_device.aesd_buffer);
+    aesd_buf = aesd_device.aesd_buffer;
+    switch (whence) {
+    case SEEK_SET:
+        new_buf_position = offset;
+        break;
+
+    case SEEK_CUR:
+        new_buf_position = file->f_pos + offset;
+        break;
+
+    case SEEK_END:
+        new_buf_position = device_size - offset;
+        break;
+
+    }
+
+    if (new_buf_position > device_size) {
+        return -EINVAL;
+    }
+
+    if( new_buf_position < 0 ) new_buf_position = 0;
+
+    file->f_pos = new_buf_position;
+
+    mutex_unlock(&aesdchar_mutex);
+
+    return new_buf_position;
+}
 
                 
 struct file_operations aesd_fops = {
@@ -238,6 +283,7 @@ struct file_operations aesd_fops = {
     .write =    aesd_write,
     .open =     aesd_open,
     .release =  aesd_release,
+    .llseek =   aesd_llseek,
 };
 
 static int aesd_setup_cdev(struct aesd_dev *dev)
