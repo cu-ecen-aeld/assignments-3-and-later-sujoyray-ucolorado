@@ -98,6 +98,7 @@ void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer)
     memset(buffer,0,sizeof(struct aesd_circular_buffer));
 }
 
+/* Returns the location of the buffer pointer where next write willtake place */
 struct aesd_buffer_entry * aesd_circular_buffer_return_full_pointer(struct aesd_circular_buffer *buffer, int * buf_status)
 {
     *buf_status  = buffer->full; 
@@ -108,6 +109,7 @@ struct aesd_buffer_entry * aesd_circular_buffer_return_full_pointer(struct aesd_
 }
 
 
+/* Returns the total size of the buffer, needed for ftell*/
 unsigned int aesd_circular_buffer_return_size(struct aesd_circular_buffer *buffer)
 {
     
