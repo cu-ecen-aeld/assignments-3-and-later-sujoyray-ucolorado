@@ -51,6 +51,7 @@
 #define MSEC_2_USEC(x)              ((x) * 1000)
 #define FIXED_RD_BUF_SIZE           (1024)
 #define MAX_TIME_ENTRY              (100)
+#define USE_AESD_CHAR_DEVICE        (1)
 
 /*******************************************************************************
  * Prototypes
@@ -84,7 +85,9 @@ static volatile sig_atomic_t write_time = 0;
 
 SLIST_HEAD(thread_head, ASEDSocThread) head = SLIST_HEAD_INITIALIZER(head);
 static pthread_mutex_t link_list_mutex = PTHREAD_MUTEX_INITIALIZER;
+#if (USE_AESD_CHAR_DEVICE != 1)
 static pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
 static timer_t timerid;
 static time_t time_value[MAX_TIME_ENTRY];
 static FILE *fp;
@@ -144,9 +147,10 @@ int main(int argc, char **argv)
 * Returns: 0 for succcess and non-zero for error
 */
 int asesd_soc_write_time_stamp(void) {
+#if (USE_AESD_CHAR_DEVICE != 1)
     int rc = 0;
     syslog(LOG_INFO,"**** Hello timer handler ****");
-    time_t now;
+    time_t now
     struct tm* cur_time;
     char time_stamp[100];
 
@@ -186,6 +190,7 @@ cleanup:
         syslog(LOG_INFO,"**** Wrote TS AESDSOCKET timer handler ****");
     }
     write_time = 0;
+#endif    
     return 0;
 }
 
@@ -341,7 +346,7 @@ static int aesdsocket_server(int d_mode) {
     struct sigaction signal_action;    
     int soc_client = -1;
     struct sockaddr_in aesdsoc_addr;
-
+    int file_create = 0;
     syslog(LOG_INFO,"**** AESDSOCKET application: socket ****");
     soc_server = socket(AF_INET, SOCK_STREAM, 0);
     if (soc_server < 0) {
@@ -386,12 +391,6 @@ static int aesdsocket_server(int d_mode) {
         ((d_mode ==1)? "TRUE" : "FALSE")); 
 
 
-    fp =  fopen("/var/tmp/aesdsocketdata", "a+");
-    if (fp == NULL) {
-        syslog(LOG_ERR, "aesdsocket: File open Error %s", strerror(errno));
-        goto  error_0;
-    }
-
     file_close = TRUE;
     
     if(asesd_soc_timer_init()) {
@@ -426,6 +425,19 @@ static int aesdsocket_server(int d_mode) {
         if (rc < 0) {
             syslog(LOG_ERR, "aesdsocket: fcntl failed %s", strerror(errno));
             goto error_3;
+        }
+
+        if (file_create == 0) {
+#if (USE_AESD_CHAR_DEVICE == 1)
+            fp =  fopen("/dev/aesdchar", "a+");
+#else
+            fp =  fopen("/var/tmp/aesdsocketdata", "a+");
+#endif
+            if (fp == NULL) {
+                syslog(LOG_ERR, "aesdsocket: File open Error %s", strerror(errno));
+                goto  error_0;
+            }
+            file_create = 1;
         }
         
         ASEDSocThread_t *thread_struct;
@@ -478,9 +490,15 @@ static int aesdsocket_server(int d_mode) {
     if(file_close) {
         fclose(fp);
     }
+#if (USE_AESD_CHAR_DEVICE == 1)
+    fclose(fp);
+    remove("/dev/aesdchar");
+
+#else
     if(remove("/var/tmp/aesdsocketdata")) {
         printf("Error file removal\n");
     }
+#endif    
     error_0:
     shutdown(soc_server, SHUT_RDWR);
     rc = (exit_aesd_soc == TRUE) ? 0 : rc;
@@ -503,10 +521,12 @@ int sendpacket(int soc_client)
     int data_wrote = 0;
     int rc = 0;
 
+#if (USE_AESD_CHAR_DEVICE != 1)
     if(pthread_mutex_lock(&file_mutex) !=0) {        
         syslog(LOG_ERR, "aesdsocket: mutex_lock failed %s", strerror(errno));
         return -1;
     }
+#endif    
 
     int file_len = ftell(fp);
     data_wrote = file_len- prev_len; 
@@ -541,9 +561,12 @@ int sendpacket(int soc_client)
 free_up_resource:
     free(tx_buf);
 return_send: 
+
+#if (USE_AESD_CHAR_DEVICE != 1)    
     if(pthread_mutex_unlock(&file_mutex) != 0) {
         syslog(LOG_ERR, "aesdsocket: mutex_unlock failed %s", strerror(errno));
     }
+#endif    
     if(rc) return rc;
     return data_wrote;
 }
@@ -588,15 +611,21 @@ static int process_and_save_data(char *buffer, char *file_buffer,
             *wr_pointer += pos;
             file_buffer[*wr_pointer] ='\n';            
             syslog(LOG_INFO, "aesdsocket: process_and_save_data: saving %d in file", *wr_pointer);
-            pthread_mutex_lock(&file_mutex);            
+#if (USE_AESD_CHAR_DEVICE != 1)            
+            pthread_mutex_lock(&file_mutex);    
+#endif
             rc = fwrite (file_buffer , sizeof(char), *wr_pointer, fp);
             if (rc < 0) {
-                syslog(LOG_ERR, "aesdsocket: fwrite failed %s", strerror(errno));                
+                syslog(LOG_ERR, "aesdsocket: fwrite failed %s", strerror(errno));   
+#if (USE_AESD_CHAR_DEVICE != 1)                
                 pthread_mutex_unlock(&file_mutex);
+#endif
                 return rc;
             } 
             fflush(fp);   
+#if (USE_AESD_CHAR_DEVICE != 1)            
             pthread_mutex_unlock(&file_mutex);
+#endif
             *wr_pointer = 0;
             len_to_copy = len_to_copy - pos;
             buf_rd_ptr += pos;

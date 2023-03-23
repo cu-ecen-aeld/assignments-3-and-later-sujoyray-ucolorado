@@ -97,3 +97,30 @@ void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer)
 {
     memset(buffer,0,sizeof(struct aesd_circular_buffer));
 }
+
+/* Returns the location of the buffer pointer where next write willtake place */
+struct aesd_buffer_entry * aesd_circular_buffer_return_full_pointer(struct aesd_circular_buffer *buffer, int * buf_status)
+{
+    *buf_status  = buffer->full; 
+    if(buffer->full == 1) {
+        return &buffer->entry[buffer->out_offs];
+    }
+    return &buffer->entry[buffer->in_offs];
+}
+
+
+/* Returns the total size of the buffer, needed for ftell*/
+unsigned int aesd_circular_buffer_return_size(struct aesd_circular_buffer *buffer)
+{
+    
+    uint8_t read_index = buffer->out_offs;    
+    size_t entry_size = 0;
+    while(1) {
+        entry_size += buffer->entry[read_index].size;
+        read_index = (read_index + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+        /* At this point, the condition below indicates the code read all the entries */
+        if(read_index == buffer->in_offs) break;
+    }
+    return entry_size;
+}
+
