@@ -124,3 +124,30 @@ unsigned int aesd_circular_buffer_return_size(struct aesd_circular_buffer *buffe
     return entry_size;
 }
 
+/* Returns the offset of a character*/
+int aesd_circular_buffer_return_char_offset(struct aesd_circular_buffer *buffer, 
+    size_t member_offset, size_t char_offset, size_t *entry_offset_byte_rtn)
+{
+    
+    uint8_t read_index = buffer->out_offs;    
+    size_t entry_size = 0;
+    while(1) {
+        if(member_offset == 0) {
+           entry_size += char_offset;
+           break;
+        }
+        entry_size += buffer->entry[read_index].size;
+        --member_offset;
+        read_index = (read_index + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+        /* At this point, the condition below indicates the code read all the entries */
+        if(read_index == buffer->in_offs) {
+            if (member_offset > 0)
+                return -1;
+        }
+        
+    }
+    *entry_offset_byte_rtn = entry_size;
+    return 0;
+}
+
+

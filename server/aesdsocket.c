@@ -37,6 +37,7 @@
 #include <errno.h>
 #include "queue.h"
 #include <pthread.h>
+#include "./../aesd-char-driver/aesd_ioctl.h"
 
 
 
@@ -63,6 +64,7 @@ static int aesdsocket_server(int d_mode);
 static void *soc_thread(void *argument);
 static void asesd_soc_timer_handler(int signum);
 static int asesd_soc_timer_init(void);
+static int find_ioctl (char *data, int length, int *word, int *offset);
 
 typedef struct ASEDSocThread {    
     pthread_t thread;
@@ -92,6 +94,7 @@ static timer_t timerid;
 static time_t time_value[MAX_TIME_ENTRY];
 static FILE *fp;
 static int prev_len = 0;
+static int force_send = 0;
 
 
 
@@ -150,7 +153,7 @@ int asesd_soc_write_time_stamp(void) {
 #if (USE_AESD_CHAR_DEVICE != 1)
     int rc = 0;
     syslog(LOG_INFO,"**** Hello timer handler ****");
-    time_t now
+    time_t now;
     struct tm* cur_time;
     char time_stamp[100];
 
@@ -529,25 +532,35 @@ int sendpacket(int soc_client)
 #endif    
 
     int file_len = ftell(fp);
-    data_wrote = file_len- prev_len; 
-    syslog(LOG_INFO, "File info %d %d", file_len, prev_len);
+    printf("sendpacket: force_send = %d, file_len = %d \n", force_send, file_len);
+    if (force_send == 0) {
+        data_wrote = file_len- prev_len; 
+        syslog(LOG_INFO, "File info %d %d", file_len, prev_len);
 
-    if((data_wrote) <=0) {
+        if((data_wrote) <=0) {
         
-        syslog(LOG_INFO, "Nothing to send %d %d", file_len, prev_len);
-        goto return_send;
-    }
-    prev_len = file_len;
-    if(!file_len) goto return_send;
+            syslog(LOG_INFO, "Nothing to send %d %d", file_len, prev_len);
+            goto return_send;
+        }
     
+        prev_len = file_len;
+        if(!file_len) goto return_send;
+    }
+    else {
+        data_wrote = file_len;
+    }
     tx_buf = (char *) malloc(file_len);
     syslog(LOG_INFO, "Sneding %d to client", file_len);
-    if(fseek(fp, 0, SEEK_SET)) {  
-        rc = -2;
-        syslog(LOG_ERR, "aesdsocket: FSEEK failed %s", strerror(errno));
-        goto free_up_resource;
+    if (force_send == 0) {
+
+        if(fseek(fp, 0, SEEK_SET)) {  
+            rc = -2;
+            syslog(LOG_ERR, "aesdsocket: FSEEK failed %s", strerror(errno));
+            goto free_up_resource;
+        }
     }
     while(fgets(tx_buf, file_len, fp) != NULL)  {
+        printf("Sending data to client %s", tx_buf);
         if(send(soc_client, tx_buf, strlen(tx_buf), 0)== -1)  {
             rc = -3;
             syslog(LOG_ERR, "aesdsocket: SEND failed %s", strerror(errno)); 
@@ -557,7 +570,8 @@ int sendpacket(int soc_client)
     if(fseek(fp, 0, SEEK_END)) {
         syslog(LOG_ERR, "aesdsocket: fseek failed %s", strerror(errno));
         rc = -4;
-    }    
+    }
+    
 free_up_resource:
     free(tx_buf);
 return_send: 
@@ -566,7 +580,8 @@ return_send:
     if(pthread_mutex_unlock(&file_mutex) != 0) {
         syslog(LOG_ERR, "aesdsocket: mutex_unlock failed %s", strerror(errno));
     }
-#endif    
+#endif  
+    force_send = 0;
     if(rc) return rc;
     return data_wrote;
 }
@@ -606,7 +621,19 @@ static int process_and_save_data(char *buffer, char *file_buffer,
             break;
         }
         else {
+            int word = 0;
+            int offset = 0;
             pos = (unsigned int)(end - start+1);
+            if (find_ioctl (buffer, rcv_data_len, &word, &offset) == 1) {
+                printf("Word = %d, offset =%d \n", word, offset);
+                int fd = fileno(fp);
+                int buf[2];
+                buf[0] =word;
+                buf[1] =offset;
+                ioctl(fd, AESDCHAR_IOCSEEKTO, &buf);
+                force_send = 1;
+                return 0;
+            }
             memcpy(&file_buffer[*wr_pointer], &buffer[buf_rd_ptr], pos); 
             *wr_pointer += pos;
             file_buffer[*wr_pointer] ='\n';            
@@ -739,6 +766,28 @@ static void *soc_thread(void *argument) {
     th_data->done = 1;
     pthread_mutex_unlock(&link_list_mutex);
     return argument;
+}
+
+static int find_ioctl (char *data, int length, int *word, int *offset) {
+
+    char* search_string = "AESDCHAR_IOCSEEKTO:";
+    int search_string_len = strlen(search_string);
+    int i;
+    
+    for (i = 0; i <= length - search_string_len; i++) {
+        if (memcmp(data + i, search_string, search_string_len) == 0) {
+            printf("Found '%s' at index %d\n", search_string, i);
+            *word = (data[i+search_string_len]) - 0x30;
+            *offset = (data[i+search_string_len+2]) - 0x30; 
+            return 1;
+        }
+    }
+    
+    if (i > length - search_string_len) {
+        printf("Search string not found\n");
+        return 0;
+    }
+    return 0;
 }
 
 

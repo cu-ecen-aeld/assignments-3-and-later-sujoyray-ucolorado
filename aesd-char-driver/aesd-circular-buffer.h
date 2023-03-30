@@ -61,6 +61,9 @@ extern void aesd_circular_buffer_init(struct aesd_circular_buffer *buffer);
 struct aesd_buffer_entry * aesd_circular_buffer_return_full_pointer(struct aesd_circular_buffer *buffer, int * buf_status);
 
 unsigned int aesd_circular_buffer_return_size(struct aesd_circular_buffer *buffer);
+int aesd_circular_buffer_return_char_offset(struct aesd_circular_buffer *buffer, 
+    size_t member_offset, size_t char_offset, size_t *entry_offset_byte_rtn);
+
 
 
 /**
