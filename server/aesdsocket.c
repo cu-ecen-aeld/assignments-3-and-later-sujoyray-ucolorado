@@ -532,7 +532,7 @@ int sendpacket(int soc_client)
 #endif    
 
     int file_len = ftell(fp);
-    printf("sendpacket: force_send = %d, file_len = %d \n", force_send, file_len);
+    syslog(LOG_INFO, "sendpacket: force_send = %d, file_len = %d \n", force_send, file_len);
     if (force_send == 0) {
         data_wrote = file_len- prev_len; 
         syslog(LOG_INFO, "File info %d %d", file_len, prev_len);
@@ -560,7 +560,7 @@ int sendpacket(int soc_client)
         }
     }
     while(fgets(tx_buf, file_len, fp) != NULL)  {
-        printf("Sending data to client %s", tx_buf);
+        syslog(LOG_INFO, "Sending data to client %s", tx_buf);
         if(send(soc_client, tx_buf, strlen(tx_buf), 0)== -1)  {
             rc = -3;
             syslog(LOG_ERR, "aesdsocket: SEND failed %s", strerror(errno)); 
@@ -625,7 +625,7 @@ static int process_and_save_data(char *buffer, char *file_buffer,
             int offset = 0;
             pos = (unsigned int)(end - start+1);
             if (find_ioctl (buffer, rcv_data_len, &word, &offset) == 1) {
-                printf("Word = %d, offset =%d \n", word, offset);
+                syslog(LOG_INFO, "Word = %d, offset =%d \n", word, offset);
                 int fd = fileno(fp);
                 int buf[2];
                 buf[0] =word;
@@ -768,6 +768,17 @@ static void *soc_thread(void *argument) {
     return argument;
 }
 
+/*
+* find_ioctl
+* 
+* Parameters:
+* argument:     data = pointer to buffer. 
+*               length = buffer length in bytes
+*               word =  Return the word offset to the caller
+*               offset = Return the byte offset to the caller
+*   
+* Returns: 1 if string is found, else 0. 
+*/
 static int find_ioctl (char *data, int length, int *word, int *offset) {
 
     char* search_string = "AESDCHAR_IOCSEEKTO:";
@@ -776,7 +787,7 @@ static int find_ioctl (char *data, int length, int *word, int *offset) {
     
     for (i = 0; i <= length - search_string_len; i++) {
         if (memcmp(data + i, search_string, search_string_len) == 0) {
-            printf("Found '%s' at index %d\n", search_string, i);
+            syslog(LOG_INFO,"Found '%s' at index %d\n", search_string, i);
             *word = (data[i+search_string_len]) - 0x30;
             *offset = (data[i+search_string_len+2]) - 0x30; 
             return 1;
@@ -784,7 +795,7 @@ static int find_ioctl (char *data, int length, int *word, int *offset) {
     }
     
     if (i > length - search_string_len) {
-        printf("Search string not found\n");
+        syslog(LOG_INFO,"Search string not found\n");
         return 0;
     }
     return 0;

@@ -129,14 +129,14 @@ static ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     struct aesd_buffer_entry *dev_buf;
     size_t entry_offset_byte = 0;
     int ret = 0;
+    int size = 0;
+    int byte_can_be_sent = 0;
+
     struct aesd_dev *dev_struct = (struct aesd_dev *)filp->private_data;
 
     PDEBUG("read %zu bytes with offset %lld \n",count,*f_pos);
     
     printk("aesd_read:read %zu bytes with offset %lld \n",count,*f_pos);
-    /**
-     * TODO: handle read
-     */
  
     ret = mutex_lock_interruptible(&dev_struct->aesdchar_mutex);
     if (ret < 0) {
@@ -144,9 +144,9 @@ static ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
         return ret;
     }
 
-    int size = aesd_circular_buffer_return_size(dev_struct->aesd_buffer);
+    size = aesd_circular_buffer_return_size(dev_struct->aesd_buffer);
     if (*f_pos >= size) {
-        printk ("End of file reached \n");
+        PDEBUG ("End of file reached \n");
         rc = 0;
         goto return_no_mem;
     }
@@ -154,15 +154,15 @@ static ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     dev_buf = aesd_circular_buffer_find_entry_offset_for_fpos(dev_struct->aesd_buffer, 
                     *f_pos, &entry_offset_byte);
 
-    printk("aesdchar: aesd_read: f_pos = %lld, offset = %d \n", *f_pos, entry_offset_byte);
+    PDEBUG("aesdchar: aesd_read: f_pos = %lld, offset = %d \n", *f_pos, entry_offset_byte);
 
     if(dev_buf == NULL) {
-        printk ("Buffer is NULL, returning \n");
+        PDEBUG ("Buffer is NULL, returning \n");
         rc = 0;
         goto return_no_mem;
     }
 
-    int byte_can_be_sent = dev_buf->size - entry_offset_byte;
+    byte_can_be_sent = dev_buf->size - entry_offset_byte;
     if (byte_can_be_sent >= count)
         byte_can_be_sent = count;
     
@@ -200,7 +200,6 @@ static ssize_t aesd_write(struct file *filp, const char __user *buf, size_t coun
     struct aesd_dev *dev_struct =  (struct aesd_dev *)filp->private_data;
 
     PDEBUG("write %zu bytes with offset %lld \n",count,*f_pos);    
-    printk("aesd_write:write %zu bytes with offset %lld \n",count,*f_pos);
 
     ret = mutex_lock_interruptible(&dev_struct->aesdchar_mutex);
     if (ret < 0) {
@@ -330,7 +329,7 @@ static loff_t aesd_llseek(struct file *file, loff_t offset, int whence)
 
     if( new_buf_position < 0 ) new_buf_position = 0;
 
-    printk("aesdchar: aesd_llseek: f_pos = %lld, offset = %lld new_buf_position =%lld \n", file->f_pos, offset, new_buf_position);
+    PDEBUG("aesdchar: aesd_llseek: f_pos = %lld, offset = %lld new_buf_position =%lld \n", file->f_pos, offset, new_buf_position);
     file->f_pos = new_buf_position;
 
     mutex_unlock(&dev_struct->aesdchar_mutex);
@@ -373,7 +372,7 @@ static long aesd_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 
 err_return:
     mutex_unlock(&dev_struct->aesdchar_mutex);
-    printk("aesd_ioctl: fops = %d \n", filep->f_pos);
+    PDEBUG("aesd_ioctl: fops = %d \n", filep->f_pos);
     return err;
 
 }
