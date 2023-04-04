@@ -201,19 +201,20 @@ static ssize_t aesd_write(struct file *filp, const char __user *buf, size_t coun
 
     PDEBUG("write %zu bytes with offset %lld \n",count,*f_pos);    
 
-    ret = mutex_lock_interruptible(&dev_struct->aesdchar_mutex);
-    if (ret < 0) {
-        printk(KERN_ERR"Mutex lock failed \n");
-        return ret;
-    }
        
     device_buffer = (char *)kmalloc(sizeof(char) * count, GFP_KERNEL);
     if (device_buffer == NULL) {
         PDEBUG("aesdchar: Memory allocation error %d \n", __LINE__);
         rc = -ENOMEM;
-        goto err_return;
+        goto err_return_no_lock;
     }
-            
+
+    ret = mutex_lock_interruptible(&dev_struct->aesdchar_mutex);
+    if (ret < 0) {
+        printk(KERN_ERR"Mutex lock failed \n");
+        return ret;
+    }
+    
     copy_size = copy_from_user(device_buffer, buf, count);
     if ( copy_size != 0) {        
         PDEBUG("Copy_from_user error \n");
@@ -290,6 +291,7 @@ static ssize_t aesd_write(struct file *filp, const char __user *buf, size_t coun
         *f_pos += count;
     }
     mutex_unlock(&dev_struct->aesdchar_mutex);
+    err_return_no_lock:
     return rc;
 }
 
@@ -343,7 +345,7 @@ static long aesd_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
     long err = 0;
     size_t entry_offset_byte_rtn = 0;
     struct aesd_dev *dev_struct = (struct aesd_dev *)filep->private_data;
-    printk("aesd_ioctl \n");
+    PDEBUG("aesd_ioctl \n");
     memset(&st, 0x0, sizeof(struct aesd_seekto));
     err = mutex_lock_interruptible(&dev_struct->aesdchar_mutex);
     if (err < 0) {

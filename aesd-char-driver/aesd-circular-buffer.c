@@ -131,6 +131,11 @@ int aesd_circular_buffer_return_char_offset(struct aesd_circular_buffer *buffer,
     
     uint8_t read_index = buffer->out_offs;    
     size_t entry_size = 0;
+
+    if(member_offset > AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED) {
+        return -1;
+    }
+    
     while(1) {
         if(member_offset == 0) {
            entry_size += char_offset;
