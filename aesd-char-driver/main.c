@@ -27,6 +27,7 @@
 #include <linux/string.h>
 #include <linux/mutex.h>
 #include <linux/uaccess.h>
+#include "aesd_ioctl.h"
 
 /*******************************************************************************
  * Definitions
@@ -45,6 +46,8 @@ static ssize_t aesd_write(struct file *filp, const char __user *buf, size_t coun
                 loff_t *f_pos);
 
 static loff_t aesd_llseek(struct file *file, loff_t offset, int whence);
+
+static long aesd_ioctl(struct file *filep, unsigned int cmd, unsigned long arg);
 
 static int aesd_setup_cdev(struct aesd_dev *dev);
 static int aesd_init_module(void);
@@ -66,12 +69,13 @@ static struct aesd_circular_buffer aesd_buf;
 static struct aesd_dev aesd_device;
 
 struct file_operations aesd_fops = {
-    .owner =    THIS_MODULE,
-    .read =     aesd_read,
-    .write =    aesd_write,
-    .open =     aesd_open,
-    .release =  aesd_release,
-    .llseek =   aesd_llseek,
+    .owner          =   THIS_MODULE,
+    .read           =   aesd_read,
+    .write          =   aesd_write,
+    .open           =   aesd_open,
+    .release        =   aesd_release,
+    .llseek         =   aesd_llseek,
+    .unlocked_ioctl =   aesd_ioctl,
 };
 
 
@@ -125,12 +129,14 @@ static ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
     struct aesd_buffer_entry *dev_buf;
     size_t entry_offset_byte = 0;
     int ret = 0;
+    int size = 0;
+    int byte_can_be_sent = 0;
+
     struct aesd_dev *dev_struct = (struct aesd_dev *)filp->private_data;
 
     PDEBUG("read %zu bytes with offset %lld \n",count,*f_pos);
-    /**
-     * TODO: handle read
-     */
+    
+    printk("aesd_read:read %zu bytes with offset %lld \n",count,*f_pos);
  
     ret = mutex_lock_interruptible(&dev_struct->aesdchar_mutex);
     if (ret < 0) {
@@ -138,25 +144,40 @@ static ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
         return ret;
     }
 
-    dev_buf = aesd_circular_buffer_find_entry_offset_for_fpos(dev_struct->aesd_buffer, 
-                    *f_pos, &entry_offset_byte);
-
-    if(dev_buf == NULL) {
+    size = aesd_circular_buffer_return_size(dev_struct->aesd_buffer);
+    if (*f_pos >= size) {
+        PDEBUG ("End of file reached \n");
         rc = 0;
         goto return_no_mem;
     }
+
+    dev_buf = aesd_circular_buffer_find_entry_offset_for_fpos(dev_struct->aesd_buffer, 
+                    *f_pos, &entry_offset_byte);
+
+    PDEBUG("aesdchar: aesd_read: f_pos = %lld, offset = %d \n", *f_pos, entry_offset_byte);
+
+    if(dev_buf == NULL) {
+        PDEBUG ("Buffer is NULL, returning \n");
+        rc = 0;
+        goto return_no_mem;
+    }
+
+    byte_can_be_sent = dev_buf->size - entry_offset_byte;
+    if (byte_can_be_sent >= count)
+        byte_can_be_sent = count;
     
-    copy_size = copy_to_user(buf, dev_buf->buffptr, dev_buf->size);
+    copy_size = copy_to_user(buf, dev_buf->buffptr + entry_offset_byte, byte_can_be_sent);
     if ( copy_size != 0) {        
         PDEBUG("Copy_to_user error \n");
         rc = -EFAULT;
         goto err_cleanup;
     }
 
-    *f_pos += dev_buf->size; 
+    *f_pos += byte_can_be_sent;
+    
     err_cleanup:
     if (rc == 0) {
-        rc = dev_buf->size;
+        rc = byte_can_be_sent;
     }
     return_no_mem:
 	mutex_unlock(&dev_struct->aesdchar_mutex);
@@ -178,21 +199,22 @@ static ssize_t aesd_write(struct file *filp, const char __user *buf, size_t coun
     char * device_buffer = NULL;
     struct aesd_dev *dev_struct =  (struct aesd_dev *)filp->private_data;
 
-    PDEBUG("write %zu bytes with offset %lld \n",count,*f_pos);
+    PDEBUG("write %zu bytes with offset %lld \n",count,*f_pos);    
+
+       
+    device_buffer = (char *)kmalloc(sizeof(char) * count, GFP_KERNEL);
+    if (device_buffer == NULL) {
+        PDEBUG("aesdchar: Memory allocation error %d \n", __LINE__);
+        rc = -ENOMEM;
+        goto err_return_no_lock;
+    }
 
     ret = mutex_lock_interruptible(&dev_struct->aesdchar_mutex);
     if (ret < 0) {
         printk(KERN_ERR"Mutex lock failed \n");
         return ret;
     }
-       
-    device_buffer = (char *)kmalloc(sizeof(char) * count, GFP_KERNEL);
-    if (device_buffer == NULL) {
-        PDEBUG("aesdchar: Memory allocation error %d \n", __LINE__);
-        rc = -ENOMEM;
-        goto err_return;
-    }
-            
+    
     copy_size = copy_from_user(device_buffer, buf, count);
     if ( copy_size != 0) {        
         PDEBUG("Copy_from_user error \n");
@@ -269,13 +291,14 @@ static ssize_t aesd_write(struct file *filp, const char __user *buf, size_t coun
         *f_pos += count;
     }
     mutex_unlock(&dev_struct->aesdchar_mutex);
+    err_return_no_lock:
     return rc;
 }
 
 
 static loff_t aesd_llseek(struct file *file, loff_t offset, int whence)
 {
-    loff_t new_buf_position;
+    loff_t new_buf_position = 0;
     unsigned int device_size = 0;
     int ret = 0;
     struct aesd_dev *dev_struct = (struct aesd_dev *)file->private_data;
@@ -308,6 +331,7 @@ static loff_t aesd_llseek(struct file *file, loff_t offset, int whence)
 
     if( new_buf_position < 0 ) new_buf_position = 0;
 
+    PDEBUG("aesdchar: aesd_llseek: f_pos = %lld, offset = %lld new_buf_position =%lld \n", file->f_pos, offset, new_buf_position);
     file->f_pos = new_buf_position;
 
     mutex_unlock(&dev_struct->aesdchar_mutex);
@@ -315,6 +339,45 @@ static loff_t aesd_llseek(struct file *file, loff_t offset, int whence)
     return new_buf_position;
 }
 
+static long aesd_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
+{
+    struct aesd_seekto st;
+    long err = 0;
+    size_t entry_offset_byte_rtn = 0;
+    struct aesd_dev *dev_struct = (struct aesd_dev *)filep->private_data;
+    PDEBUG("aesd_ioctl \n");
+    memset(&st, 0x0, sizeof(struct aesd_seekto));
+    err = mutex_lock_interruptible(&dev_struct->aesdchar_mutex);
+    if (err < 0) {
+        printk(KERN_ERR"Mutex lock failed \n");
+        return err;
+    }
+
+    switch (cmd) {
+        case AESDCHAR_IOCSEEKTO:
+            if(copy_from_user(&st, (char*)arg, sizeof(struct aesd_seekto))) {
+                printk(KERN_ERR "Failed to copy data from user space\n");
+                err = -EFAULT;
+                goto err_return;
+            }
+            if(aesd_circular_buffer_return_char_offset(dev_struct->aesd_buffer, 
+            st.write_cmd, st.write_cmd_offset, &entry_offset_byte_rtn)) {
+                err = -EINVAL;
+                goto err_return;
+            }
+            filep->f_pos = entry_offset_byte_rtn;
+            break;
+
+        default:
+            err = -ENOTTY;
+    }
+
+err_return:
+    mutex_unlock(&dev_struct->aesdchar_mutex);
+    PDEBUG("aesd_ioctl: fops = %d \n", filep->f_pos);
+    return err;
+
+}
                 
 static int aesd_setup_cdev(struct aesd_dev *dev)
 {
